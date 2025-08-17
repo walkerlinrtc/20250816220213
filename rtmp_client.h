@@ -344,9 +344,23 @@ public:
     
     // 专用日志方法
     void logPerformance(const std::string& operation, std::chrono::milliseconds duration);
-    void logNetworkStatus(const std::string& status, const std::map<std::string, std::string>& details);
+    void logNetworkStatus(const std::string& status, const std::map<std::string, std::string>& details = {});
     void logRTMPMessage(const std::string& direction, uint8_t msg_type, uint32_t timestamp, size_t data_size);
     void logStatistics();
+    
+    // 调试日志增强方法
+    void logConnectionDetails();
+    void logHandshakeStep(const std::string& step, const std::vector<uint8_t>& data);
+    void logRTMPChunk(const std::string& direction, uint8_t chunk_stream_id, uint8_t msg_type, uint32_t timestamp, size_t data_size);
+    void logAMF0Data(const std::string& context, const std::vector<uint8_t>& data);
+    void logSocketOperation(const std::string& operation, ssize_t result, int error_code = errno);
+    void logFLVTag(const std::string& context, uint8_t tag_type, uint32_t timestamp, size_t data_size);
+    void logConnectionState(const std::string& from_state, const std::string& to_state, const std::string& reason = "");
+    void logBufferStatus(size_t send_buffer_size, size_t recv_buffer_size, size_t queue_size);
+    void logTimingInfo(const std::string& operation, uint32_t expected_time, uint32_t actual_time);
+    void logErrorDetails(const std::string& operation, int error_code, const std::string& additional_info = "");
+    void logMemoryUsage();
+    void dumpHexData(const std::string& title, const std::vector<uint8_t>& data, size_t max_bytes = 256);
     
     // 日志控制方法
     void setLogLevel(const std::string& level);

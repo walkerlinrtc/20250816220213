@@ -25,108 +25,143 @@ RTMPClient::~RTMPClient() {
 }
 
 bool RTMPClient::connect(const std::string& url) {
+    RTMP_LOG_DEBUG(*this, "开始连接到RTMP服务器: " + url);
+    
+    // 解析URL
+    RTMP_LOG_DEBUG(*this, "解析RTMP URL");
     if (!parseURL(url)) {
-        std::cerr << "Failed to parse RTMP URL" << std::endl;
+        RTMP_LOG_ERROR(*this, "URL解析失败");
         return false;
     }
+    RTMP_LOG_DEBUG(*this, "URL解析成功 - Host: " + host_ + ", Port: " + std::to_string(port_) + ", App: " + app_ + ", Stream: " + stream_key_);
     
-    if (!connectSocket()) {
-        std::cerr << "Failed to connect to server" << std::endl;
-        return false;
-    }
-    
-    if (!handshake()) {
-        std::cerr << "RTMP handshake failed" << std::endl;
-        return false;
-    }
-    
-    if (!sendConnect()) {
-        std::cerr << "Failed to send connect command" << std::endl;
-        return false;
-    }
-    
-    if (!sendCreateStream()) {
-        std::cerr << "Failed to create stream" << std::endl;
-        return false;
-    }
-    
-    if (!sendPublish()) {
-        std::cerr << "Failed to publish stream" << std::endl;
-        return false;
-    }
-    
-    std::cout << "RTMP connection established successfully" << std::endl;
-    return true;
-}
-
-void RTMPClient::disconnect() {
-    if (socket_fd_ != -1) {
-        close(socket_fd_);
-        socket_fd_ = -1;
-    }
-}
-
-bool RTMPClient::parseURL(const std::string& url) {
-    // 解析 rtmp://host:port/app/stream_key 格式的URL
-    if (url.substr(0, 7) != "rtmp://") {
-        return false;
-    }
-    
-    std::string remaining = url.substr(7);
-    size_t slash_pos = remaining.find('/');
-    if (slash_pos == std::string::npos) {
-        return false;
-    }
-    
-    std::string host_port = remaining.substr(0, slash_pos);
-    std::string path = remaining.substr(slash_pos + 1);
-    
-    // 解析主机和端口
-    size_t colon_pos = host_port.find(':');
-    if (colon_pos != std::string::npos) {
-        server_host_ = host_port.substr(0, colon_pos);
-        server_port_ = std::stoi(host_port.substr(colon_pos + 1));
-    } else {
-        server_host_ = host_port;
-        server_port_ = 1935;
-    }
-    
-    // 解析应用名和流密钥
-    size_t app_slash = path.find('/');
-    if (app_slash != std::string::npos) {
-        app_name_ = path.substr(0, app_slash);
-        stream_key_ = path.substr(app_slash + 1);
-    } else {
-        app_name_ = path;
-        stream_key_ = "live";
-    }
-    
-    return true;
-}
-
-bool RTMPClient::connectSocket() {
+    // 创建socket
+    RTMP_LOG_DEBUG(*this, "创建TCP socket");
     socket_fd_ = socket(AF_INET, SOCK_STREAM, 0);
     if (socket_fd_ < 0) {
+        setError("Failed to create socket: " + std::string(strerror(errno)));
+        RTMP_LOG_ERROR(*this, "Socket创建失败: " + std::string(strerror(errno)));
         return false;
     }
+    RTMP_LOG_DEBUG(*this, "Socket创建成功, fd=" + std::to_string(socket_fd_));
     
+    // 设置socket为非阻塞模式
+    RTMP_LOG_DEBUG(*this, "设置socket为非阻塞模式");
+    int flags = fcntl(socket_fd_, F_GETFL, 0);
+    fcntl(socket_fd_, F_SETFL, flags | O_NONBLOCK);
+    
+    // 连接到服务器
+    RTMP_LOG_DEBUG(*this, "准备连接到服务器地址");
     struct sockaddr_in server_addr;
     memset(&server_addr, 0, sizeof(server_addr));
     server_addr.sin_family = AF_INET;
-    server_addr.sin_port = htons(server_port_);
+    server_addr.sin_port = htons(port_);
     
-    if (inet_pton(AF_INET, server_host_.c_str(), &server_addr.sin_addr) <= 0) {
-        struct hostent* host_entry = gethostbyname(server_host_.c_str());
-        if (!host_entry) {
-            return false;
-        }
-        memcpy(&server_addr.sin_addr, host_entry->h_addr_list[0], host_entry->h_length);
-    }
-    
-    if (::connect(socket_fd_, (struct sockaddr*)&server_addr, sizeof(server_addr)) < 0) {
+    if (inet_pton(AF_INET, host_.c_str(), &server_addr.sin_addr) <= 0) {
+        setError("Invalid server address: " + host_);
+        RTMP_LOG_ERROR(*this, "无效的服务器地址: " + host_);
+        close(socket_fd_);
+        socket_fd_ = -1;
         return false;
     }
+    RTMP_LOG_DEBUG(*this, "服务器地址解析成功");
     
+    RTMP_LOG_DEBUG(*this, "发起TCP连接");
+    int result = ::connect(socket_fd_, (struct sockaddr*)&server_addr, sizeof(server_addr));
+    if (result < 0 && errno != EINPROGRESS) {
+        setError("Failed to connect: " + std::string(strerror(errno)));
+        RTMP_LOG_ERROR(*this, "TCP连接失败: " + std::string(strerror(errno)));
+        close(socket_fd_);
+        socket_fd_ = -1;
+        return false;
+    }
+    RTMP_LOG_DEBUG(*this, "TCP连接已发起，等待完成");
+    
+    // 等待连接完成
+    RTMP_LOG_DEBUG(*this, "使用select等待连接完成，超时: " + std::to_string(config_.connect_timeout_ms) + "ms");
+    fd_set write_fds;
+    FD_ZERO(&write_fds);
+    FD_SET(socket_fd_, &write_fds);
+    
+    struct timeval timeout;
+    timeout.tv_sec = config_.connect_timeout_ms / 1000;
+    timeout.tv_usec = (config_.connect_timeout_ms % 1000) * 1000;
+    
+    result = select(socket_fd_ + 1, nullptr, &write_fds, nullptr, &timeout);
+    if (result <= 0) {
+        setError("Connection timeout or error");
+        RTMP_LOG_ERROR(*this, "连接超时或错误, select result=" + std::to_string(result));
+        close(socket_fd_);
+        socket_fd_ = -1;
+        return false;
+    }
+    RTMP_LOG_DEBUG(*this, "select返回成功，检查连接状态");
+    
+    // 检查连接是否成功
+    int error = 0;
+    socklen_t len = sizeof(error);
+    if (getsockopt(socket_fd_, SOL_SOCKET, SO_ERROR, &error, &len) < 0 || error != 0) {
+        setError("Connection failed: " + std::string(strerror(error)));
+        RTMP_LOG_ERROR(*this, "连接失败: " + std::string(strerror(error)));
+        close(socket_fd_);
+        socket_fd_ = -1;
+        return false;
+    }
+    RTMP_LOG_DEBUG(*this, "TCP连接建立成功");
+    
+    // 设置socket为阻塞模式
+    RTMP_LOG_DEBUG(*this, "设置socket为阻塞模式");
+    flags = fcntl(socket_fd_, F_GETFL, 0);
+    fcntl(socket_fd_, F_SETFL, flags & ~O_NONBLOCK);
+    
+    // 设置socket超时
+    RTMP_LOG_DEBUG(*this, "设置socket超时: " + std::to_string(config_.read_timeout_ms) + "ms");
+    setSocketTimeout(config_.read_timeout_ms);
+    
+    setState(STATE_CONNECTED);
+    
+    // 执行RTMP握手
+    RTMP_LOG_DEBUG(*this, "开始RTMP握手");
+    if (!performHandshake()) {
+        RTMP_LOG_ERROR(*this, "RTMP握手失败");
+        close(socket_fd_);
+        socket_fd_ = -1;
+        return false;
+    }
+    RTMP_LOG_DEBUG(*this, "RTMP握手完成");
+    
+    // 发送connect命令
+    RTMP_LOG_DEBUG(*this, "发送RTMP connect命令");
+    if (!sendConnect()) {
+        RTMP_LOG_ERROR(*this, "发送connect命令失败");
+        close(socket_fd_);
+        socket_fd_ = -1;
+        return false;
+    }
+    RTMP_LOG_DEBUG(*this, "connect命令发送成功");
+    
+    // 发送createStream命令
+    RTMP_LOG_DEBUG(*this, "发送RTMP createStream命令");
+    if (!sendCreateStream()) {
+        RTMP_LOG_ERROR(*this, "发送createStream命令失败");
+        close(socket_fd_);
+        socket_fd_ = -1;
+        return false;
+    }
+    RTMP_LOG_DEBUG(*this, "createStream命令发送成功");
+    
+    // 发送publish命令
+    RTMP_LOG_DEBUG(*this, "发送RTMP publish命令");
+    if (!sendPublish()) {
+        RTMP_LOG_ERROR(*this, "发送publish命令失败");
+        close(socket_fd_);
+        socket_fd_ = -1;
+        return false;
+    }
+    RTMP_LOG_DEBUG(*this, "publish命令发送成功");
+    
+    setState(STATE_PUBLISHING);
+    RTMP_LOG_DEBUG(*this, "RTMP连接和初始化完成，进入推流状态");
     return true;
 }
 
