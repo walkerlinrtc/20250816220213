@@ -93,7 +93,7 @@ int main(int argc, char* argv[]) {
     if (!client.connectWithRetry(rtmp_url, 3)) {
         auto end_time = std::chrono::steady_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
-        client.logPerformance("连接失败", duration);
+        RTMP_LOG_INFO(client, "PERF: 连接失败 took " + std::to_string(duration.count()) + "ms");
         RTMP_LOG_ERROR(client, "连接RTMP服务器失败");
         client.flushLogs();
         return 1;
@@ -101,7 +101,7 @@ int main(int argc, char* argv[]) {
     
     auto end_time = std::chrono::steady_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
-    client.logPerformance("连接建立", duration);
+    RTMP_LOG_INFO(client, "PERF: 连接建立 took " + std::to_string(duration.count()) + "ms");
     
     // 启动心跳线程
     client.startHeartbeatThread();
@@ -113,7 +113,7 @@ int main(int argc, char* argv[]) {
     if (!client.pushFLVFile(flv_file)) {
         end_time = std::chrono::steady_clock::now();
         duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
-        client.logPerformance("推流失败", duration);
+        RTMP_LOG_INFO(client, "PERF: 推流失败 took " + std::to_string(duration.count()) + "ms");
         RTMP_LOG_ERROR(client, "推送FLV文件失败");
         client.stopHeartbeatThread();
         client.flushLogs();
@@ -122,13 +122,24 @@ int main(int argc, char* argv[]) {
     
     end_time = std::chrono::steady_clock::now();
     duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
-    client.logPerformance("推流完成", duration);
+    RTMP_LOG_INFO(client, "PERF: 推流完成 took " + std::to_string(duration.count()) + "ms");
     
     // 停止心跳线程
     client.stopHeartbeatThread();
     
     // 显示最终统计
-    client.logStatistics();
+    // 获取并打印统计信息
+    auto stats = client.getStatistics();
+    auto runtime = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::steady_clock::now() - stats.start_time);
+    
+    RTMP_LOG_INFO(client, "STATS: Runtime=" + std::to_string(runtime.count()) + "s" +
+                  ", Sent=" + std::to_string(stats.bytes_sent / 1024) + "KB" +
+                  ", Recv=" + std::to_string(stats.bytes_received / 1024) + "KB" +
+                  ", AudioFrames=" + std::to_string(stats.audio_frames) +
+                  ", VideoFrames=" + std::to_string(stats.video_frames) +
+                  ", Dropped=" + std::to_string(stats.dropped_frames) +
+                  ", AvgBitrate=" + std::to_string(stats.avg_bitrate / 1000) + "kbps");
     RTMP_LOG_INFO(client, "推流任务成功完成");
     
     // 刷新并关闭日志
