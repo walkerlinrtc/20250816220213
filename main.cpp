@@ -73,27 +73,27 @@ int main(int argc, char* argv[]) {
     
     client.setConfig(rtmp_config);
     
-    client.logInfo("RTMP客户端启动");
-    client.logInfoF("参数: URL=%s, 文件=%s", rtmp_url.c_str(), flv_file.c_str());
+    RTMP_LOG_INFO(client, "RTMP客户端启动");
+    RTMP_LOG_INFO_F(client, "参数: URL=%s, 文件=%s", rtmp_url.c_str(), flv_file.c_str());
     
     // 检查FLV文件是否存在
     if (!fs::exists(flv_file)) {
-        client.logError("FLV文件不存在: " + flv_file);
+        RTMP_LOG_ERROR(client, "FLV文件不存在: " + flv_file);
         return 1;
     }
     
     auto file_size = fs::file_size(flv_file);
-    client.logInfoF("FLV文件大小: %.2f MB", file_size / (1024.0 * 1024.0));
+    RTMP_LOG_INFO_F(client, "FLV文件大小: %.2f MB", file_size / (1024.0 * 1024.0));
     
     // 使用重试机制连接
-    client.logInfo("开始连接到RTMP服务器: " + rtmp_url);
+    RTMP_LOG_INFO(client, "开始连接到RTMP服务器: " + rtmp_url);
     auto start_time = std::chrono::steady_clock::now();
     
     if (!client.connectWithRetry(rtmp_url, 3)) {
         auto end_time = std::chrono::steady_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
         client.logPerformance("连接失败", duration);
-        client.logError("连接RTMP服务器失败");
+        RTMP_LOG_ERROR(client, "连接RTMP服务器失败");
         client.flushLogs();
         return 1;
     }
@@ -106,14 +106,14 @@ int main(int argc, char* argv[]) {
     client.startHeartbeatThread();
     
     // 推送FLV文件
-    client.logInfo("开始推送FLV文件: " + flv_file);
+    RTMP_LOG_INFO(client, "开始推送FLV文件: " + flv_file);
     start_time = std::chrono::steady_clock::now();
     
     if (!client.pushFLVFile(flv_file)) {
         end_time = std::chrono::steady_clock::now();
         duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
         client.logPerformance("推流失败", duration);
-        client.logError("推送FLV文件失败");
+        RTMP_LOG_ERROR(client, "推送FLV文件失败");
         client.stopHeartbeatThread();
         client.flushLogs();
         return 1;
@@ -128,7 +128,7 @@ int main(int argc, char* argv[]) {
     
     // 显示最终统计
     client.logStatistics();
-    client.logInfo("推流任务成功完成");
+    RTMP_LOG_INFO(client, "推流任务成功完成");
     
     // 刷新并关闭日志
     client.flushLogs();

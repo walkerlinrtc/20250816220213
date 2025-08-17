@@ -11,15 +11,15 @@
 // 带重试的连接
 bool RTMPClient::connectWithRetry(const std::string& url, uint32_t max_retries) {
     for (uint32_t attempt = 0; attempt <= max_retries; ++attempt) {
-        logInfo("Connection attempt " + std::to_string(attempt + 1) + "/" + std::to_string(max_retries + 1));
+        RTMP_LOG_INFO(*this, "Connection attempt " + std::to_string(attempt + 1) + "/" + std::to_string(max_retries + 1));
         
         if (connect(url)) {
-            logInfo("Connected successfully on attempt " + std::to_string(attempt + 1));
+            RTMP_LOG_INFO(*this, "Connected successfully on attempt " + std::to_string(attempt + 1));
             return true;
         }
         
         if (attempt < max_retries) {
-            logInfo("Connection failed, retrying in " + std::to_string(config_.retry_interval_ms) + "ms");
+            RTMP_LOG_INFO(*this, "Connection failed, retrying in " + std::to_string(config_.retry_interval_ms) + "ms");
             std::this_thread::sleep_for(std::chrono::milliseconds(config_.retry_interval_ms));
         }
     }
@@ -35,22 +35,22 @@ void RTMPClient::setState(ConnectionState state) {
     
     switch (state) {
         case STATE_DISCONNECTED:
-            logInfo("State: DISCONNECTED");
+            RTMP_LOG_INFO(*this, "State: DISCONNECTED");
             break;
         case STATE_CONNECTING:
-            logInfo("State: CONNECTING");
+            RTMP_LOG_INFO(*this, "State: CONNECTING");
             break;
         case STATE_HANDSHAKING:
-            logInfo("State: HANDSHAKING");
+            RTMP_LOG_INFO(*this, "State: HANDSHAKING");
             break;
         case STATE_CONNECTED:
-            logInfo("State: CONNECTED");
+            RTMP_LOG_INFO(*this, "State: CONNECTED");
             break;
         case STATE_PUBLISHING:
-            logInfo("State: PUBLISHING");
+            RTMP_LOG_INFO(*this, "State: PUBLISHING");
             break;
         case STATE_ERROR:
-            logError("State: ERROR - " + last_error_);
+            RTMP_LOG_ERROR(*this, "State: ERROR - " + last_error_);
             break;
     }
 }
@@ -59,12 +59,12 @@ void RTMPClient::setError(const std::string& error) {
     std::lock_guard<std::mutex> lock(state_mutex_);
     last_error_ = error;
     connection_state_ = STATE_ERROR;
-    logError("Error: " + error);
+    RTMP_LOG_ERROR(*this, "Error: " + error);
 }
 
-ConnectionState RTMPClient::getConnectionState() const {
-    std::lock_guard<std::mutex> lock(const_cast<std::mutex&>(state_mutex_));
-    return connection_state_;
+void RTMPClient::setConfig(const RTMPConfig& config) {
+    config_ = config;
+    RTMP_LOG_INFO(*this, "Configuration updated");
 }
 
 bool RTMPClient::isConnected() const {
@@ -149,7 +149,7 @@ RTMPStatistics RTMPClient::getStatistics() const {
 // 配置设置
 void RTMPClient::setConfig(const RTMPConfig& config) {
     config_ = config;
-    logInfo("Configuration updated");
+    RTMP_LOG_INFO(*this, "Configuration updated");
 }
 
 // Socket超时设置
@@ -161,12 +161,12 @@ bool RTMPClient::setSocketTimeout(int timeout_ms) {
     timeout.tv_usec = (timeout_ms % 1000) * 1000;
     
     if (setsockopt(socket_fd_, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) < 0) {
-        logError("Failed to set receive timeout: " + std::string(strerror(errno)));
+        RTMP_LOG_ERROR(*this, "Failed to set receive timeout: " + std::string(strerror(errno)));
         return false;
     }
     
     if (setsockopt(socket_fd_, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout)) < 0) {
-        logError("Failed to set send timeout: " + std::string(strerror(errno)));
+        RTMP_LOG_ERROR(*this, "Failed to set send timeout: " + std::string(strerror(errno)));
         return false;
     }
     
@@ -188,7 +188,7 @@ bool RTMPClient::waitForData(int timeout_ms) {
     int result = select(socket_fd_ + 1, &read_fds, nullptr, nullptr, &timeout);
     
     if (result < 0) {
-        logError("Select error: " + std::string(strerror(errno)));
+        RTMP_LOG_ERROR(*this, "Select error: " + std::string(strerror(errno)));
         return false;
     }
     
@@ -208,9 +208,9 @@ bool RTMPClient::sendHeartbeat() {
     
     bool result = sendRTMPMessage(RTMP_MSG_USER_CONTROL, 0, ping_data);
     if (result) {
-        logDebug("Heartbeat sent");
+        RTMP_LOG_DEBUG(*this, "Heartbeat sent");
     } else {
-        logError("Failed to send heartbeat");
+        RTMP_LOG_ERROR(*this, "Failed to send heartbeat");
     }
     
     return result;
@@ -223,7 +223,7 @@ void RTMPClient::startHeartbeatThread() {
     
     heartbeat_running_ = true;
     heartbeat_thread_ = std::thread(&RTMPClient::heartbeatThreadFunc, this);
-    logInfo("Heartbeat thread started");
+    RTMP_LOG_INFO(*this, "Heartbeat thread started");
 }
 
 void RTMPClient::stopHeartbeatThread() {
@@ -235,14 +235,14 @@ void RTMPClient::stopHeartbeatThread() {
     if (heartbeat_thread_.joinable()) {
         heartbeat_thread_.join();
     }
-    logInfo("Heartbeat thread stopped");
+    RTMP_LOG_INFO(*this, "Heartbeat thread stopped");
 }
 
 void RTMPClient::heartbeatThreadFunc() {
     while (heartbeat_running_) {
         if (isConnected()) {
             if (!sendHeartbeat()) {
-                logError("Heartbeat failed, connection may be lost");
+                RTMP_LOG_ERROR(*this, "Heartbeat failed, connection may be lost");
                 setError("Heartbeat failed");
                 break;
             }
