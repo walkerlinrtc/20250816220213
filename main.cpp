@@ -28,9 +28,9 @@ namespace fs {
 
 int main(int argc, char* argv[]) {
     if (argc < 3 || argc > 4) {
-        std::cout << "Usage: " << argv[0] << " <rtmp_url> <flv_file> [config_file]" << std::endl;
-        std::cout << "Example: " << argv[0] << " rtmp://localhost:1935/live/stream test.flv" << std::endl;
-        std::cout << "         " << argv[0] << " rtmp://localhost:1935/live/stream test.flv rtmp_client.conf" << std::endl;
+        std::cerr << "Usage: " << argv[0] << " <rtmp_url> <flv_file> [config_file]" << std::endl;
+        std::cerr << "Example: " << argv[0] << " rtmp://localhost:1935/live/stream test.flv" << std::endl;
+        std::cerr << "         " << argv[0] << " rtmp://localhost:1935/live/stream test.flv rtmp_client.conf" << std::endl;
         return 1;
     }
     
@@ -45,9 +45,9 @@ int main(int argc, char* argv[]) {
             std::cerr << "Failed to load config file: " << config_file << std::endl;
             return 1;
         }
-        std::cout << "Loaded config from: " << config_file << std::endl;
+        RTMP_LOG_INFO(client, "从配置文件加载: " + config_file);
     } else {
-        std::cout << "Config file not found: " << config_file << ", using default settings" << std::endl;
+        RTMP_LOG_WARN(client, "配置文件未找到: " + config_file + ", 使用默认设置");
     }
     
     // 创建日志目录

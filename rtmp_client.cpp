@@ -392,7 +392,7 @@ bool RTMPClient::pushFLVFile(const std::string& flv_file_path) {
     }
     
     file.close();
-    std::cout << "FLV file pushed successfully" << std::endl;
+    RTMP_LOG_INFO(*this, "FLV文件推送成功");
     return true;
 }
 
@@ -686,8 +686,8 @@ bool RTMPClient::handleRTMPMessage(const RTMPMessageHeader& header,
             
         default:
             // 忽略其他类型的消息
-            std::cout << "Received message type: " << static_cast<int>(header.message_type) 
-                     << ", length: " << header.message_length << std::endl;
+            RTMP_LOG_DEBUG(*this, "接收到消息类型: " + std::to_string(static_cast<int>(header.message_type)) + 
+                          ", 长度: " + std::to_string(header.message_length));
             return true;
     }
 }
@@ -708,8 +708,8 @@ bool RTMPClient::handleChunkSize(const std::vector<uint8_t>& data) {
     uint32_t old_chunk_size = chunk_size_;
     chunk_size_ = new_chunk_size;
     
-    std::cout << "Server changed chunk size from " << old_chunk_size 
-              << " to " << chunk_size_ << " bytes" << std::endl;
+    RTMP_LOG_INFO(*this, "服务器更改块大小从 " + std::to_string(old_chunk_size) + 
+                  " 到 " + std::to_string(chunk_size_) + " 字节");
     
     // 如果需要，可以向服务器发送确认
     return sendChunkSizeAck();
@@ -729,7 +729,7 @@ bool RTMPClient::handleAcknowledgement(const std::vector<uint8_t>& data) {
     }
     
     uint32_t bytes_received = readUint32BE(data.data());
-    std::cout << "Server acknowledged: " << bytes_received << " bytes" << std::endl;
+    RTMP_LOG_DEBUG(*this, "服务器确认: " + std::to_string(bytes_received) + " 字节");
     return true;
 }
 
@@ -739,7 +739,7 @@ bool RTMPClient::handleWindowAckSize(const std::vector<uint8_t>& data) {
     }
     
     window_ack_size_ = readUint32BE(data.data());
-    std::cout << "Server set window ack size to: " << window_ack_size_ << std::endl;
+    RTMP_LOG_INFO(*this, "服务器设置窗口确认大小为: " + std::to_string(window_ack_size_));
     return true;
 }
 
@@ -751,8 +751,8 @@ bool RTMPClient::handleSetPeerBandwidth(const std::vector<uint8_t>& data) {
     uint32_t bandwidth = readUint32BE(data.data());
     uint8_t limit_type = data[4];
     
-    std::cout << "Server set peer bandwidth: " << bandwidth 
-             << ", limit type: " << static_cast<int>(limit_type) << std::endl;
+    RTMP_LOG_DEBUG(*this, "服务器设置对等带宽: " + std::to_string(bandwidth) + 
+                   ", 限制类型: " + std::to_string(static_cast<int>(limit_type)));
     return true;
 }
 
@@ -762,25 +762,25 @@ bool RTMPClient::handleUserControl(const std::vector<uint8_t>& data) {
     }
     
     uint16_t event_type = readUint16BE(data.data());
-    std::cout << "User control event: " << event_type << std::endl;
+    RTMP_LOG_DEBUG(*this, "用户控制事件: " + std::to_string(event_type));
     
     switch (event_type) {
         case 0: // Stream Begin
             if (data.size() >= 6) {
                 uint32_t stream_id = readUint32BE(data.data() + 2);
-                std::cout << "Stream begin: " << stream_id << std::endl;
+                RTMP_LOG_DEBUG(*this, "流开始: " + std::to_string(stream_id));
             }
             break;
         case 1: // Stream EOF
             if (data.size() >= 6) {
                 uint32_t stream_id = readUint32BE(data.data() + 2);
-                std::cout << "Stream EOF: " << stream_id << std::endl;
+                RTMP_LOG_DEBUG(*this, "流结束: " + std::to_string(stream_id));
             }
             break;
         case 2: // Stream Dry
             if (data.size() >= 6) {
                 uint32_t stream_id = readUint32BE(data.data() + 2);
-                std::cout << "Stream dry: " << stream_id << std::endl;
+                RTMP_LOG_DEBUG(*this, "流干涸: " + std::to_string(stream_id));
             }
             break;
         default:
@@ -800,7 +800,7 @@ bool RTMPClient::handleAMF0Command(const std::vector<uint8_t>& data) {
         return false;
     }
     
-    std::cout << "Received AMF0 command: " << command.string_value << std::endl;
+    RTMP_LOG_DEBUG(*this, "接收到AMF0命令: " + command.string_value);
     
     // 解析事务ID
     AMFValue transaction_id = decodeAMF0Value(ptr, remaining);
@@ -837,22 +837,22 @@ bool RTMPClient::handleAMF3Command(const std::vector<uint8_t>& data) {
         return false;
     }
     
-    std::cout << "Received AMF3 command: " << command.string_value << std::endl;
+    RTMP_LOG_DEBUG(*this, "接收到AMF3命令: " + command.string_value);
     return true;
 }
 
 bool RTMPClient::handleCommandResult(double transaction_id, const uint8_t* data, size_t remaining) {
-    std::cout << "Command result for transaction " << transaction_id << std::endl;
+    RTMP_LOG_DEBUG(*this, "事务命令结果 " + std::to_string(transaction_id));
     
     if (transaction_id == 1.0) {
         // connect命令的响应
-        std::cout << "Connect command succeeded" << std::endl;
+        RTMP_LOG_INFO(*this, "连接命令成功");
     } else if (transaction_id == 2.0) {
         // createStream命令的响应
         if (remaining > 0) {
             AMFValue stream_id = decodeAMF0Value(data, remaining);
             if (stream_id.type == AMF0_NUMBER) {
-                std::cout << "Created stream ID: " << stream_id.number << std::endl;
+                RTMP_LOG_INFO(*this, "创建流ID: " + std::to_string(stream_id.number));
             }
         }
     }
@@ -861,7 +861,7 @@ bool RTMPClient::handleCommandResult(double transaction_id, const uint8_t* data,
 }
 
 bool RTMPClient::handleCommandError(double transaction_id, const uint8_t* data, size_t remaining) {
-    std::cout << "Command error for transaction " << transaction_id << std::endl;
+    RTMP_LOG_ERROR(*this, "事务命令错误 " + std::to_string(transaction_id));
     
     // 解析错误信息
     if (remaining > 0) {
@@ -878,10 +878,10 @@ bool RTMPClient::handleOnStatus(const uint8_t* data, size_t remaining) {
         if (status_obj.type == AMF0_OBJECT) {
             auto it = status_obj.object_value.find("code");
             if (it != status_obj.object_value.end() && it->second.type == AMF0_STRING) {
-                std::cout << "Status code: " << it->second.string_value << std::endl;
+                RTMP_LOG_DEBUG(*this, "状态码: " + it->second.string_value);
                 
                 if (it->second.string_value == "NetStream.Publish.Start") {
-                    std::cout << "Publish started successfully" << std::endl;
+                    RTMP_LOG_INFO(*this, "发布开始成功");
                     return true;
                 } else if (it->second.string_value.find("Error") != std::string::npos) {
                     std::cerr << "Publish error: " << it->second.string_value << std::endl;
