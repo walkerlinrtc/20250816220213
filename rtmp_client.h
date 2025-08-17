@@ -331,36 +331,7 @@ public:
     void logInternal(spdlog::level::level_enum level, const char* file, int line, const std::string& message);
     void logInternalF(spdlog::level::level_enum level, const char* file, int line, const char* format, ...);
     
-    // 基础日志方法（使用宏定义）
-    void logInfo(const std::string& message);
-    void logError(const std::string& message);
-    void logDebug(const std::string& message);
-    void logWarn(const std::string& message);
     
-    // 格式化日志方法
-    void logInfoF(const char* format, ...);
-    void logErrorF(const char* format, ...);
-    void logDebugF(const char* format, ...);
-    
-    // 专用日志方法
-    void logPerformance(const std::string& operation, std::chrono::milliseconds duration);
-    void logNetworkStatus(const std::string& status, const std::map<std::string, std::string>& details = {});
-    void logRTMPMessage(const std::string& direction, uint8_t msg_type, uint32_t timestamp, size_t data_size);
-    void logStatistics();
-    
-    // 调试日志增强方法
-    void logConnectionDetails();
-    void logHandshakeStep(const std::string& step, const std::vector<uint8_t>& data);
-    void logRTMPChunk(const std::string& direction, uint8_t chunk_stream_id, uint8_t msg_type, uint32_t timestamp, size_t data_size);
-    void logAMF0Data(const std::string& context, const std::vector<uint8_t>& data);
-    void logSocketOperation(const std::string& operation, ssize_t result, int error_code = errno);
-    void logFLVTag(const std::string& context, uint8_t tag_type, uint32_t timestamp, size_t data_size);
-    void logConnectionState(const std::string& from_state, const std::string& to_state, const std::string& reason = "");
-    void logBufferStatus(size_t send_buffer_size, size_t recv_buffer_size, size_t queue_size);
-    void logTimingInfo(const std::string& operation, uint32_t expected_time, uint32_t actual_time);
-    void logErrorDetails(const std::string& operation, int error_code, const std::string& additional_info = "");
-    void logMemoryUsage();
-    void dumpHexData(const std::string& title, const std::vector<uint8_t>& data, size_t max_bytes = 256);
     
     // 日志控制方法
     bool initializeLogger();
@@ -368,27 +339,5 @@ public:
     void flushLogs();
     void shutdownLogger();
 };
-
-// 日志宏定义，自动包含文件名和行号
-#define RTMP_LOG_INFO(client, message) \
-    (client).logInternal(spdlog::level::info, __FILE__, __LINE__, message)
-
-#define RTMP_LOG_ERROR(client, message) \
-    (client).logInternal(spdlog::level::err, __FILE__, __LINE__, message)
-
-#define RTMP_LOG_DEBUG(client, message) \
-    (client).logInternal(spdlog::level::debug, __FILE__, __LINE__, message)
-
-#define RTMP_LOG_WARN(client, message) \
-    (client).logInternal(spdlog::level::warn, __FILE__, __LINE__, message)
-
-#define RTMP_LOG_INFO_F(client, format, ...) \
-    (client).logInternalF(spdlog::level::info, __FILE__, __LINE__, format, ##__VA_ARGS__)
-
-#define RTMP_LOG_ERROR_F(client, format, ...) \
-    (client).logInternalF(spdlog::level::err, __FILE__, __LINE__, format, ##__VA_ARGS__)
-
-#define RTMP_LOG_DEBUG_F(client, format, ...) \
-    (client).logInternalF(spdlog::level::debug, __FILE__, __LINE__, format, ##__VA_ARGS__)
 
 #endif // RTMP_CLIENT_H

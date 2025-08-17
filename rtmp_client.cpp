@@ -1,4 +1,5 @@
 #include "rtmp_client.h"
+#include "rtmp_logger.h"
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -1714,141 +1715,246 @@ void RTMPClient::disconnect() {
     RTMP_LOG_INFO(*this, "连接已断开");
 }
 
-// ========== 调试日志方法 ==========
+// ========== 扩展功能实现 ==========
 
-void RTMPClient::          () {
-    RTMP_LOG_DEBUG(*this, "=== 连接详细信息 ===");
-    RTMP_LOG_DEBUG(*this, "Socket FD: " + std::to_string(socket_fd_));
-    RTMP_LOG_DEBUG(*this, "服务器地址: " + server_host_ + ":" + std::to_string(server_port_));
-    RTMP_LOG_DEBUG(*this, "应用名: " + app_name_);
-    RTMP_LOG_DEBUG(*this, "流名: " + stream_key_);
-    RTMP_LOG_DEBUG(*this, "块大小: " + std::to_string(chunk_size_));
-    RTMP_LOG_DEBUG(*this, "窗口确认大小: " + std::to_string(window_ack_size_));
+// 带重试的连接
+bool RTMPClient::connectWithRetry(const std::string& url, uint32_t max_retries) {
+    for (uint32_t attempt = 0; attempt <= max_retries; ++attempt) {
+        RTMP_LOG_INFO(*this, "Connection attempt " + std::to_string(attempt + 1) + "/" + std::to_string(max_retries + 1));
+        
+        if (connect(url)) {
+            RTMP_LOG_INFO(*this, "Connected successfully on attempt " + std::to_string(attempt + 1));
+            return true;
+        }
+        
+        if (attempt < max_retries) {
+            RTMP_LOG_INFO(*this, "Connection failed, retrying in " + std::to_string(config_.retry_interval_ms) + "ms");
+            std::this_thread::sleep_for(std::chrono::milliseconds(config_.retry_interval_ms));
+        }
+    }
+    
+    setError("Failed to connect after " + std::to_string(max_retries + 1) + " attempts");
+    return false;
 }
 
-void RTMPClient::logHandshakeStep(const std::string& step, const std::vector<uint8_t>& data) {
-    RTMP_LOG_DEBUG(*this, "握手步骤: " + step);
-    RTMP_LOG_DEBUG(*this, "数据大小: " + std::to_string(data.size()) + " 字节");
+// 状态管理
+void RTMPClient::setState(ConnectionState state) {
+    std::lock_guard<std::mutex> lock(state_mutex_);
+    connection_state_ = state;
     
-    if (data.size() > 0) {
-        std::ostringstream hex_stream;
-        hex_stream << "数据内容(前32字节): ";
-        size_t show_bytes = std::min(data.size(), static_cast<size_t>(32));
-        for (size_t i = 0; i < show_bytes; ++i) {
-            hex_stream << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(data[i]) << " ";
-        }
-        if (data.size() > 32) {
-            hex_stream << "...";
-        }
-        RTMP_LOG_DEBUG(*this, hex_stream.str());
+    switch (state) {
+        case STATE_DISCONNECTED:
+            RTMP_LOG_INFO(*this, "State: DISCONNECTED");
+            break;
+        case STATE_CONNECTING:
+            RTMP_LOG_INFO(*this, "State: CONNECTING");
+            break;
+        case STATE_HANDSHAKING:
+            RTMP_LOG_INFO(*this, "State: HANDSHAKING");
+            break;
+        case STATE_CONNECTED:
+            RTMP_LOG_INFO(*this, "State: CONNECTED");
+            break;
+        case STATE_PUBLISHING:
+            RTMP_LOG_INFO(*this, "State: PUBLISHING");
+            break;
+        case STATE_ERROR:
+            RTMP_LOG_ERROR(*this, "State: ERROR - " + last_error_);
+            break;
     }
 }
 
-void RTMPClient::logRTMPChunk(const std::string& direction, uint8_t chunk_stream_id, 
-                             uint8_t msg_type, uint32_t timestamp, size_t data_size) {
-    std::ostringstream oss;
-    oss << "RTMP块 " << direction << " - "
-        << "ChunkStreamID=" << static_cast<int>(chunk_stream_id)
-        << ", MsgType=" << static_cast<int>(msg_type)
-        << ", Timestamp=" << timestamp
-        << ", Size=" << data_size;
-    
-    RTMP_LOG_DEBUG(*this, oss.str());
-    
-    // 解释消息类型
-    std::string msg_type_name;
-    switch (msg_type) {
-        case 1: msg_type_name = "Chunk Size"; break;
-        case 2: msg_type_name = "Abort Message"; break;
-        case 3: msg_type_name = "Acknowledgement"; break;
-        case 4: msg_type_name = "User Control Message"; break;
-        case 5: msg_type_name = "Window Acknowledgement Size"; break;
-        case 6: msg_type_name = "Set Peer Bandwidth"; break;
-        case 8: msg_type_name = "Audio Message"; break;
-        case 9: msg_type_name = "Video Message"; break;
-        case 15: msg_type_name = "AMF3 Data Message"; break;
-        case 16: msg_type_name = "AMF3 Shared Object Message"; break;
-        case 17: msg_type_name = "AMF3 Command Message"; break;
-        case 18: msg_type_name = "AMF0 Data Message"; break;
-        case 19: msg_type_name = "AMF0 Shared Object Message"; break;
-        case 20: msg_type_name = "AMF0 Command Message"; break;
-        case 22: msg_type_name = "Aggregate Message"; break;
-        default: msg_type_name = "Unknown"; break;
-    }
-    RTMP_LOG_DEBUG(*this, "消息类型: " + msg_type_name);
+void RTMPClient::setError(const std::string& error) {
+    std::lock_guard<std::mutex> lock(state_mutex_);
+    last_error_ = error;
+    connection_state_ = STATE_ERROR;
+    RTMP_LOG_ERROR(*this, "Error: " + error);
 }
 
-void RTMPClient::logSocketOperation(const std::string& operation, ssize_t result, int error_code) {
-    if (result >= 0) {
-        RTMP_LOG_DEBUG(*this, "Socket " + operation + " 成功: " + std::to_string(result) + " 字节");
+void RTMPClient::setConfig(const RTMPConfig& config) {
+    config_ = config;
+    RTMP_LOG_INFO(*this, "Configuration updated");
+}
+
+bool RTMPClient::isConnected() const {
+    std::lock_guard<std::mutex> lock(const_cast<std::mutex&>(state_mutex_));
+    return connection_state_ == STATE_CONNECTED || connection_state_ == STATE_PUBLISHING;
+}
+
+// 检查连接状态
+bool RTMPClient::checkConnection() {
+    if (socket_fd_ < 0) {
+        setError("Socket is not valid");
+        return false;
+    }
+    
+    // 使用select检查socket状态
+    fd_set read_fds, error_fds;
+    FD_ZERO(&read_fds);
+    FD_ZERO(&error_fds);
+    FD_SET(socket_fd_, &read_fds);
+    FD_SET(socket_fd_, &error_fds);
+    
+    struct timeval timeout = {0, 0}; // 非阻塞检查
+    int result = select(socket_fd_ + 1, &read_fds, nullptr, &error_fds, &timeout);
+    
+    if (result < 0) {
+        setError("Socket select error: " + std::string(strerror(errno)));
+        return false;
+    }
+    
+    if (FD_ISSET(socket_fd_, &error_fds)) {
+        setError("Socket error detected");
+        return false;
+    }
+    
+    return true;
+}
+
+// 统计信息更新
+void RTMPClient::updateStatistics(size_t bytes_sent, size_t bytes_received) {
+    std::lock_guard<std::mutex> lock(statistics_mutex_);
+    
+    statistics_.bytes_sent += bytes_sent;
+    statistics_.bytes_received += bytes_received;
+    
+    if (bytes_sent > 0) statistics_.packets_sent++;
+    if (bytes_received > 0) statistics_.packets_received++;
+    
+    // 更新比特率
+    auto now = std::chrono::steady_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::seconds>(now - statistics_.last_update);
+    
+    if (duration.count() >= 1) {
+        statistics_.current_bitrate = static_cast<uint32_t>(bytes_sent * 8 / duration.count());
+        
+        auto total_duration = std::chrono::duration_cast<std::chrono::seconds>(now - statistics_.start_time);
+        if (total_duration.count() > 0) {
+            statistics_.avg_bitrate = static_cast<uint32_t>(statistics_.bytes_sent * 8 / total_duration.count());
+        }
+        
+        statistics_.last_update = now;
+    }
+}
+
+void RTMPClient::updateFrameCount(uint8_t frame_type) {
+    std::lock_guard<std::mutex> lock(statistics_mutex_);
+    
+    switch (frame_type) {
+        case FLV_TAG_AUDIO:
+            statistics_.audio_frames++;
+            break;
+        case FLV_TAG_VIDEO:
+            statistics_.video_frames++;
+            break;
+    }
+}
+
+RTMPStatistics RTMPClient::getStatistics() const {
+    std::lock_guard<std::mutex> lock(const_cast<std::mutex&>(statistics_mutex_));
+    return statistics_;
+}
+
+// Socket超时设置
+bool RTMPClient::setSocketTimeout(int timeout_ms) {
+    if (socket_fd_ < 0) return false;
+    
+    struct timeval timeout;
+    timeout.tv_sec = timeout_ms / 1000;
+    timeout.tv_usec = (timeout_ms % 1000) * 1000;
+    
+    if (setsockopt(socket_fd_, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) < 0) {
+        RTMP_LOG_ERROR(*this, "Failed to set receive timeout: " + std::string(strerror(errno)));
+        return false;
+    }
+    
+    if (setsockopt(socket_fd_, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout)) < 0) {
+        RTMP_LOG_ERROR(*this, "Failed to set send timeout: " + std::string(strerror(errno)));
+        return false;
+    }
+    
+    return true;
+}
+
+// 等待数据可读
+bool RTMPClient::waitForData(int timeout_ms) {
+    if (socket_fd_ < 0) return false;
+    
+    fd_set read_fds;
+    FD_ZERO(&read_fds);
+    FD_SET(socket_fd_, &read_fds);
+    
+    struct timeval timeout;
+    timeout.tv_sec = timeout_ms / 1000;
+    timeout.tv_usec = (timeout_ms % 1000) * 1000;
+    
+    int result = select(socket_fd_ + 1, &read_fds, nullptr, nullptr, &timeout);
+    
+    if (result < 0) {
+        RTMP_LOG_ERROR(*this, "Select error: " + std::string(strerror(errno)));
+        return false;
+    }
+    
+    return result > 0 && FD_ISSET(socket_fd_, &read_fds);
+}
+
+// 心跳功能
+bool RTMPClient::sendHeartbeat() {
+    if (!isConnected()) {
+        return false;
+    }
+    
+    // 发送Ping消息
+    std::vector<uint8_t> ping_data(6);
+    writeUint16BE(ping_data, 6); // Ping事件类型
+    writeUint32BE(ping_data, static_cast<uint32_t>(std::time(nullptr))); // 时间戳
+    
+    bool result = sendRTMPMessage(RTMP_MSG_USER_CONTROL, 0, ping_data);
+    if (result) {
+        RTMP_LOG_DEBUG(*this, "Heartbeat sent");
     } else {
-        RTMP_LOG_ERROR(*this, "Socket " + operation + " 失败: " + std::string(strerror(error_code)));
-    }
-}
-
-void RTMPClient::logFLVTag(const std::string& context, uint8_t tag_type, uint32_t timestamp, size_t data_size) {
-    std::string tag_type_name;
-    switch (tag_type) {
-        case 8: tag_type_name = "Audio"; break;
-        case 9: tag_type_name = "Video"; break;
-        case 18: tag_type_name = "Script Data"; break;
-        default: tag_type_name = "Unknown(" + std::to_string(tag_type) + ")"; break;
+        RTMP_LOG_ERROR(*this, "Failed to send heartbeat");
     }
     
-    RTMP_LOG_DEBUG(*this, "FLV标签 " + context + " - 类型: " + tag_type_name + 
-                   ", 时间戳: " + std::to_string(timestamp) + "ms" +
-                   ", 大小: " + std::to_string(data_size) + " 字节");
+    return result;
 }
 
-void RTMPClient::logConnectionState(const std::string& from_state, const std::string& to_state, const std::string& reason) {
-    RTMP_LOG_DEBUG(*this, "连接状态变化: " + from_state + " -> " + to_state + 
-                   (reason.empty() ? "" : " (原因: " + reason + ")"));
-}
-
-void RTMPClient::logErrorDetails(const std::string& operation, int error_code, const std::string& additional_info) {
-    RTMP_LOG_ERROR(*this, "错误详情 - 操作: " + operation + 
-                   ", 错误码: " + std::to_string(error_code) + 
-                   ", 错误信息: " + std::string(strerror(error_code)) +
-                   (additional_info.empty() ? "" : ", 附加信息: " + additional_info));
-}
-
-void RTMPClient::dumpHexData(const std::string& title, const std::vector<uint8_t>& data, size_t max_bytes) {
-    if (data.empty()) {
-        RTMP_LOG_DEBUG(*this, title + ": (空数据)");
+void RTMPClient::startHeartbeatThread() {
+    if (!config_.enable_heartbeat || heartbeat_running_) {
         return;
     }
     
-    size_t dump_size = std::min(data.size(), max_bytes);
-    std::ostringstream oss;
-    oss << title << " (" << data.size() << " 字节):\n";
+    heartbeat_running_ = true;
+    heartbeat_thread_ = std::thread(&RTMPClient::heartbeatThreadFunc, this);
+    RTMP_LOG_INFO(*this, "Heartbeat thread started");
+}
+
+void RTMPClient::stopHeartbeatThread() {
+    if (!heartbeat_running_) {
+        return;
+    }
     
-    for (size_t i = 0; i < dump_size; i += 16) {
-        // 地址
-        oss << std::hex << std::setw(8) << std::setfill('0') << i << ": ";
-        
-        // 十六进制数据
-        for (size_t j = 0; j < 16; ++j) {
-            if (i + j < dump_size) {
-                oss << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(data[i + j]) << " ";
-            } else {
-                oss << "   ";
+    heartbeat_running_ = false;
+    if (heartbeat_thread_.joinable()) {
+        heartbeat_thread_.join();
+    }
+    RTMP_LOG_INFO(*this, "Heartbeat thread stopped");
+}
+
+void RTMPClient::heartbeatThreadFunc() {
+    while (heartbeat_running_) {
+        if (isConnected()) {
+            if (!sendHeartbeat()) {
+                RTMP_LOG_ERROR(*this, "Heartbeat failed, connection may be lost");
+                setError("Heartbeat failed");
+                break;
             }
         }
         
-        oss << " ";
-        
-        // ASCII数据
-        for (size_t j = 0; j < 16 && i + j < dump_size; ++j) {
-            char c = static_cast<char>(data[i + j]);
-            oss << (isprint(c) ? c : '.');
+        // 等待心跳间隔
+        for (uint32_t i = 0; i < config_.heartbeat_interval_ms / 100 && heartbeat_running_; ++i) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
-        
-        oss << "\n";
     }
-    
-    if (data.size() > max_bytes) {
-        oss << "... (还有 " << (data.size() - max_bytes) << " 字节未显示)";
-    }
-    
-    RTMP_LOG_DEBUG(*this, oss.str());
 }
+

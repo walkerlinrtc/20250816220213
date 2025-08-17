@@ -1,4 +1,5 @@
 #include "rtmp_client.h"
+#include "rtmp_logger.h"
 #include "config_parser.h"
 #include <iostream>
 #include <string>
