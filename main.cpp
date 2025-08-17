@@ -1,4 +1,5 @@
 #include "rtmp_client.h"
+#include "config_parser.h"
 #include <iostream>
 #include <string>
 #include <chrono>
@@ -26,30 +27,51 @@ namespace fs {
 }
 
 int main(int argc, char* argv[]) {
-    if (argc != 3) {
-        std::cout << "Usage: " << argv[0] << " <rtmp_url> <flv_file>" << std::endl;
+    if (argc < 3 || argc > 4) {
+        std::cout << "Usage: " << argv[0] << " <rtmp_url> <flv_file> [config_file]" << std::endl;
         std::cout << "Example: " << argv[0] << " rtmp://localhost:1935/live/stream test.flv" << std::endl;
+        std::cout << "         " << argv[0] << " rtmp://localhost:1935/live/stream test.flv rtmp_client.conf" << std::endl;
         return 1;
     }
     
     std::string rtmp_url = argv[1];
     std::string flv_file = argv[2];
+    std::string config_file = (argc == 4) ? argv[3] : "rtmp_client.conf";
+    
+    // 加载配置文件
+    ConfigParser config;
+    if (fs::exists(config_file)) {
+        if (!config.loadConfig(config_file)) {
+            std::cerr << "Failed to load config file: " << config_file << std::endl;
+            return 1;
+        }
+        std::cout << "Loaded config from: " << config_file << std::endl;
+    } else {
+        std::cout << "Config file not found: " << config_file << ", using default settings" << std::endl;
+    }
     
     // 创建日志目录
     fs::create_directories("logs");
     
     RTMPClient client;
     
-    // 设置日志级别
-    client.setLogLevel("info");
+    // 从配置文件设置日志级别
+    std::string log_level = config.getString("logging", "log_level", "info");
+    client.setLogLevel(log_level);
     
-    // 配置客户端参数
-    RTMPConfig config;
-    config.connect_timeout_ms = 10000;
-    config.max_retry_count = 3;
-    config.enable_heartbeat = true;
-    config.enable_statistics = true;
-    client.setConfig(config);
+    // 从配置文件配置客户端参数
+    RTMPConfig rtmp_config;
+    rtmp_config.connect_timeout_ms = config.getInt("connection", "connect_timeout_ms", 10000);
+    rtmp_config.read_timeout_ms = config.getInt("connection", "read_timeout_ms", 3000);
+    rtmp_config.write_timeout_ms = config.getInt("connection", "write_timeout_ms", 3000);
+    rtmp_config.max_retry_count = config.getInt("connection", "max_retry_count", 3);
+    rtmp_config.retry_interval_ms = config.getInt("connection", "retry_interval_ms", 1000);
+    rtmp_config.enable_heartbeat = config.getBool("rtmp", "enable_heartbeat", true);
+    rtmp_config.heartbeat_interval_ms = config.getInt("rtmp", "heartbeat_interval_ms", 30000);
+    rtmp_config.enable_statistics = config.getBool("statistics", "enable_statistics", true);
+    rtmp_config.max_queue_size = config.getInt("performance", "max_queue_size", 1000);
+    
+    client.setConfig(rtmp_config);
     
     client.logInfo("RTMP客户端启动");
     client.logInfoF("参数: URL=%s, 文件=%s", rtmp_url.c_str(), flv_file.c_str());

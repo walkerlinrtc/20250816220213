@@ -37,11 +37,13 @@ set(SOURCES
     rtmp_client.cpp
     rtmp_client_extended.cpp
     rtmp_logger.cpp
+    config_parser.cpp
 )
 
 # 头文件
 set(HEADERS
     rtmp_client.h
+    config_parser.h
 )
 
 # 创建可执行文件
