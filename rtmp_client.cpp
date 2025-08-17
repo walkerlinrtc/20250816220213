@@ -4,6 +4,8 @@
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <unistd.h>
+#include <fcntl.h>
+#include <errno.h>
 #include <cstring>
 #include <iostream>
 #include <thread>
@@ -33,7 +35,7 @@ bool RTMPClient::connect(const std::string& url) {
         RTMP_LOG_ERROR(*this, "URL解析失败");
         return false;
     }
-    RTMP_LOG_DEBUG(*this, "URL解析成功 - Host: " + host_ + ", Port: " + std::to_string(port_) + ", App: " + app_ + ", Stream: " + stream_key_);
+    RTMP_LOG_DEBUG(*this, "URL解析成功 - Host: " + server_host_ + ", Port: " + std::to_string(server_port_) + ", App: " + app_name_ + ", Stream: " + stream_key_);
     
     // 创建socket
     RTMP_LOG_DEBUG(*this, "创建TCP socket");
@@ -55,11 +57,11 @@ bool RTMPClient::connect(const std::string& url) {
     struct sockaddr_in server_addr;
     memset(&server_addr, 0, sizeof(server_addr));
     server_addr.sin_family = AF_INET;
-    server_addr.sin_port = htons(port_);
+    server_addr.sin_port = htons(server_port_);
     
-    if (inet_pton(AF_INET, host_.c_str(), &server_addr.sin_addr) <= 0) {
-        setError("Invalid server address: " + host_);
-        RTMP_LOG_ERROR(*this, "无效的服务器地址: " + host_);
+    if (inet_pton(AF_INET, server_host_.c_str(), &server_addr.sin_addr) <= 0) {
+        setErrror("Invalid server address: " + server_host_);
+        RTMP_LOG_ERROR(*this, "无效的服务器地址: " + server_host_);
         close(socket_fd_);
         socket_fd_ = -1;
         return false;
@@ -122,7 +124,7 @@ bool RTMPClient::connect(const std::string& url) {
     
     // 执行RTMP握手
     RTMP_LOG_DEBUG(*this, "开始RTMP握手");
-    if (!performHandshake()) {
+    if (!handshake()) {
         RTMP_LOG_ERROR(*this, "RTMP握手失败");
         close(socket_fd_);
         socket_fd_ = -1;

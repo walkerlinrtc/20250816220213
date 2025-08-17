@@ -146,11 +146,6 @@ RTMPStatistics RTMPClient::getStatistics() const {
     return statistics_;
 }
 
-// 配置设置
-void RTMPClient::setConfig(const RTMPConfig& config) {
-    config_ = config;
-    RTMP_LOG_INFO(*this, "Configuration updated");
-}
 
 // Socket超时设置
 bool RTMPClient::setSocketTimeout(int timeout_ms) {

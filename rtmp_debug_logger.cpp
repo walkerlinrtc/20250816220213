@@ -7,8 +7,8 @@
 void RTMPClient::logConnectionDetails() {
     RTMP_LOG_DEBUG(*this, "=== 连接详细信息 ===");
     RTMP_LOG_DEBUG(*this, "Socket FD: " + std::to_string(socket_fd_));
-    RTMP_LOG_DEBUG(*this, "服务器地址: " + host_ + ":" + std::to_string(port_));
-    RTMP_LOG_DEBUG(*this, "应用名: " + app_);
+    RTMP_LOG_DEBUG(*this, "服务器地址: " + server_host_ + ":" + std::to_string(server_port_));
+    RTMP_LOG_DEBUG(*this, "应用名: " + app_name_);
     RTMP_LOG_DEBUG(*this, "流名: " + stream_key_);
     RTMP_LOG_DEBUG(*this, "块大小: " + std::to_string(chunk_size_));
     RTMP_LOG_DEBUG(*this, "窗口确认大小: " + std::to_string(window_ack_size_));

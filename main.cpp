@@ -38,6 +38,11 @@ int main(int argc, char* argv[]) {
     std::string flv_file = argv[2];
     std::string config_file = (argc == 4) ? argv[3] : "rtmp_client.conf";
     
+    // 创建日志目录
+    fs::create_directories("logs");
+    
+    RTMPClient client;
+    
     // 加载配置文件
     ConfigParser config;
     if (fs::exists(config_file)) {
@@ -49,11 +54,6 @@ int main(int argc, char* argv[]) {
     } else {
         RTMP_LOG_WARN(client, "配置文件未找到: " + config_file + ", 使用默认设置");
     }
-    
-    // 创建日志目录
-    fs::create_directories("logs");
-    
-    RTMPClient client;
     
     // 从配置文件设置日志级别
     std::string log_level = config.getString("logging", "log_level", "info");

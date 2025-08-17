@@ -363,6 +363,7 @@ public:
     void dumpHexData(const std::string& title, const std::vector<uint8_t>& data, size_t max_bytes = 256);
     
     // 日志控制方法
+    bool initializeLogger();
     void setLogLevel(const std::string& level);
     void flushLogs();
     void shutdownLogger();
