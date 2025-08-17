@@ -37,7 +37,6 @@ set(SOURCES
     rtmp_client.cpp
     rtmp_client_extended.cpp
     rtmp_logger.cpp
-    rtmp_debug_logger.cpp
     config_parser.cpp
 )
 

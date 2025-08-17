@@ -1713,3 +1713,142 @@ void RTMPClient::disconnect() {
     
     RTMP_LOG_INFO(*this, "连接已断开");
 }
+
+// ========== 调试日志方法 ==========
+
+void RTMPClient::          () {
+    RTMP_LOG_DEBUG(*this, "=== 连接详细信息 ===");
+    RTMP_LOG_DEBUG(*this, "Socket FD: " + std::to_string(socket_fd_));
+    RTMP_LOG_DEBUG(*this, "服务器地址: " + server_host_ + ":" + std::to_string(server_port_));
+    RTMP_LOG_DEBUG(*this, "应用名: " + app_name_);
+    RTMP_LOG_DEBUG(*this, "流名: " + stream_key_);
+    RTMP_LOG_DEBUG(*this, "块大小: " + std::to_string(chunk_size_));
+    RTMP_LOG_DEBUG(*this, "窗口确认大小: " + std::to_string(window_ack_size_));
+}
+
+void RTMPClient::logHandshakeStep(const std::string& step, const std::vector<uint8_t>& data) {
+    RTMP_LOG_DEBUG(*this, "握手步骤: " + step);
+    RTMP_LOG_DEBUG(*this, "数据大小: " + std::to_string(data.size()) + " 字节");
+    
+    if (data.size() > 0) {
+        std::ostringstream hex_stream;
+        hex_stream << "数据内容(前32字节): ";
+        size_t show_bytes = std::min(data.size(), static_cast<size_t>(32));
+        for (size_t i = 0; i < show_bytes; ++i) {
+            hex_stream << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(data[i]) << " ";
+        }
+        if (data.size() > 32) {
+            hex_stream << "...";
+        }
+        RTMP_LOG_DEBUG(*this, hex_stream.str());
+    }
+}
+
+void RTMPClient::logRTMPChunk(const std::string& direction, uint8_t chunk_stream_id, 
+                             uint8_t msg_type, uint32_t timestamp, size_t data_size) {
+    std::ostringstream oss;
+    oss << "RTMP块 " << direction << " - "
+        << "ChunkStreamID=" << static_cast<int>(chunk_stream_id)
+        << ", MsgType=" << static_cast<int>(msg_type)
+        << ", Timestamp=" << timestamp
+        << ", Size=" << data_size;
+    
+    RTMP_LOG_DEBUG(*this, oss.str());
+    
+    // 解释消息类型
+    std::string msg_type_name;
+    switch (msg_type) {
+        case 1: msg_type_name = "Chunk Size"; break;
+        case 2: msg_type_name = "Abort Message"; break;
+        case 3: msg_type_name = "Acknowledgement"; break;
+        case 4: msg_type_name = "User Control Message"; break;
+        case 5: msg_type_name = "Window Acknowledgement Size"; break;
+        case 6: msg_type_name = "Set Peer Bandwidth"; break;
+        case 8: msg_type_name = "Audio Message"; break;
+        case 9: msg_type_name = "Video Message"; break;
+        case 15: msg_type_name = "AMF3 Data Message"; break;
+        case 16: msg_type_name = "AMF3 Shared Object Message"; break;
+        case 17: msg_type_name = "AMF3 Command Message"; break;
+        case 18: msg_type_name = "AMF0 Data Message"; break;
+        case 19: msg_type_name = "AMF0 Shared Object Message"; break;
+        case 20: msg_type_name = "AMF0 Command Message"; break;
+        case 22: msg_type_name = "Aggregate Message"; break;
+        default: msg_type_name = "Unknown"; break;
+    }
+    RTMP_LOG_DEBUG(*this, "消息类型: " + msg_type_name);
+}
+
+void RTMPClient::logSocketOperation(const std::string& operation, ssize_t result, int error_code) {
+    if (result >= 0) {
+        RTMP_LOG_DEBUG(*this, "Socket " + operation + " 成功: " + std::to_string(result) + " 字节");
+    } else {
+        RTMP_LOG_ERROR(*this, "Socket " + operation + " 失败: " + std::string(strerror(error_code)));
+    }
+}
+
+void RTMPClient::logFLVTag(const std::string& context, uint8_t tag_type, uint32_t timestamp, size_t data_size) {
+    std::string tag_type_name;
+    switch (tag_type) {
+        case 8: tag_type_name = "Audio"; break;
+        case 9: tag_type_name = "Video"; break;
+        case 18: tag_type_name = "Script Data"; break;
+        default: tag_type_name = "Unknown(" + std::to_string(tag_type) + ")"; break;
+    }
+    
+    RTMP_LOG_DEBUG(*this, "FLV标签 " + context + " - 类型: " + tag_type_name + 
+                   ", 时间戳: " + std::to_string(timestamp) + "ms" +
+                   ", 大小: " + std::to_string(data_size) + " 字节");
+}
+
+void RTMPClient::logConnectionState(const std::string& from_state, const std::string& to_state, const std::string& reason) {
+    RTMP_LOG_DEBUG(*this, "连接状态变化: " + from_state + " -> " + to_state + 
+                   (reason.empty() ? "" : " (原因: " + reason + ")"));
+}
+
+void RTMPClient::logErrorDetails(const std::string& operation, int error_code, const std::string& additional_info) {
+    RTMP_LOG_ERROR(*this, "错误详情 - 操作: " + operation + 
+                   ", 错误码: " + std::to_string(error_code) + 
+                   ", 错误信息: " + std::string(strerror(error_code)) +
+                   (additional_info.empty() ? "" : ", 附加信息: " + additional_info));
+}
+
+void RTMPClient::dumpHexData(const std::string& title, const std::vector<uint8_t>& data, size_t max_bytes) {
+    if (data.empty()) {
+        RTMP_LOG_DEBUG(*this, title + ": (空数据)");
+        return;
+    }
+    
+    size_t dump_size = std::min(data.size(), max_bytes);
+    std::ostringstream oss;
+    oss << title << " (" << data.size() << " 字节):\n";
+    
+    for (size_t i = 0; i < dump_size; i += 16) {
+        // 地址
+        oss << std::hex << std::setw(8) << std::setfill('0') << i << ": ";
+        
+        // 十六进制数据
+        for (size_t j = 0; j < 16; ++j) {
+            if (i + j < dump_size) {
+                oss << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(data[i + j]) << " ";
+            } else {
+                oss << "   ";
+            }
+        }
+        
+        oss << " ";
+        
+        // ASCII数据
+        for (size_t j = 0; j < 16 && i + j < dump_size; ++j) {
+            char c = static_cast<char>(data[i + j]);
+            oss << (isprint(c) ? c : '.');
+        }
+        
+        oss << "\n";
+    }
+    
+    if (data.size() > max_bytes) {
+        oss << "... (还有 " << (data.size() - max_bytes) << " 字节未显示)";
+    }
+    
+    RTMP_LOG_DEBUG(*this, oss.str());
+}
