@@ -60,7 +60,7 @@ bool RTMPClient::connect(const std::string& url) {
     server_addr.sin_port = htons(server_port_);
     
     if (inet_pton(AF_INET, server_host_.c_str(), &server_addr.sin_addr) <= 0) {
-        setErrror("Invalid server address: " + server_host_);
+        setError("Invalid server address: " + server_host_);
         RTMP_LOG_ERROR(*this, "无效的服务器地址: " + server_host_);
         close(socket_fd_);
         socket_fd_ = -1;
@@ -1645,4 +1645,71 @@ void RTMPClient::clearAMF3References() {
     amf3_string_table_.clear();
     amf3_object_table_.clear();
     amf3_trait_table_.clear();
+}
+
+// URL解析函数
+bool RTMPClient::parseURL(const std::string& url) {
+    // 解析RTMP URL格式: rtmp://host:port/app/stream
+    if (url.substr(0, 7) != "rtmp://") {
+        setError("Invalid RTMP URL format");
+        return false;
+    }
+    
+    std::string remaining = url.substr(7); // 去掉 "rtmp://"
+    
+    // 查找端口分隔符
+    size_t port_pos = remaining.find(':');
+    size_t path_pos = remaining.find('/');
+    
+    if (path_pos == std::string::npos) {
+        setError("Missing application path in URL");
+        return false;
+    }
+    
+    // 提取主机名
+    if (port_pos != std::string::npos && port_pos < path_pos) {
+        server_host_ = remaining.substr(0, port_pos);
+        std::string port_str = remaining.substr(port_pos + 1, path_pos - port_pos - 1);
+        server_port_ = std::stoi(port_str);
+    } else {
+        server_host_ = remaining.substr(0, path_pos);
+        server_port_ = 1935; // 默认RTMP端口
+    }
+    
+    // 提取应用名和流名
+    std::string path = remaining.substr(path_pos + 1);
+    size_t stream_pos = path.find('/');
+    
+    if (stream_pos != std::string::npos) {
+        app_name_ = path.substr(0, stream_pos);
+        stream_key_ = path.substr(stream_pos + 1);
+    } else {
+        app_name_ = path;
+        stream_key_ = "stream"; // 默认流名
+    }
+    
+    return true;
+}
+
+// 断开连接函数
+void RTMPClient::disconnect() {
+    RTMP_LOG_DEBUG(*this, "开始断开连接");
+    
+    // 停止心跳线程
+    stopHeartbeatThread();
+    
+    // 关闭socket
+    if (socket_fd_ >= 0) {
+        close(socket_fd_);
+        socket_fd_ = -1;
+        RTMP_LOG_DEBUG(*this, "Socket已关闭");
+    }
+    
+    // 重置状态
+    setState(STATE_DISCONNECTED);
+    
+    // 清理AMF引用表
+    clearAMF3References();
+    
+    RTMP_LOG_INFO(*this, "连接已断开");
 }

@@ -210,3 +210,41 @@ void RTMPClient::shutdownLogger() {
         g_logger.reset();
     }
 }
+
+// 格式化日志方法 - 内部使用，包含文件名和行号
+void RTMPClient::logInternalF(spdlog::level::level_enum level, const char* file, int line, const char* format, ...) {
+    if (!g_logger) {
+        if (!initializeLogger()) {
+            return;
+        }
+    }
+    
+    // 处理可变参数
+    va_list args;
+    va_start(args, format);
+    
+    // 计算需要的缓冲区大小
+    int size = vsnprintf(nullptr, 0, format, args);
+    va_end(args);
+    
+    if (size <= 0) {
+        return;
+    }
+    
+    // 分配缓冲区并格式化字符串
+    std::vector<char> buffer(size + 1);
+    va_start(args, format);
+    vsnprintf(buffer.data(), buffer.size(), format, args);
+    va_end(args);
+    
+    // 提取文件名（去掉路径）
+    const char* filename = strrchr(file, '/');
+    if (!filename) {
+        filename = strrchr(file, '\\');
+    }
+    filename = filename ? filename + 1 : file;
+    
+    // 使用spdlog的source_loc来设置文件名和行号
+    spdlog::source_loc loc{filename, line, ""};
+    g_logger->log(loc, level, std::string(buffer.data()));
+}
